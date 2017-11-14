@@ -516,7 +516,7 @@ class CustomDockerSpawner(GitMixin, EmailNotificator, ContainerHandler):
             try:
                 # self.log.info('poll {}'.format(self.user.server.url))
                 yield wait_for_http_server(self.user.server.url, timeout=1)
-            except TimeoutError:
+            except:
                 self.log.warn("Can't reach running container by http")
                 return ''
             return None
