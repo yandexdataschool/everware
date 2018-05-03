@@ -5,6 +5,7 @@ node_modules
 build
 dist
 env.sh
+venv/
 # ignore config file at the top-level of the repo
 # but not sub-dirs
 /jupyterhub_config.py

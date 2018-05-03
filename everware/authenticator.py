@@ -9,6 +9,8 @@ import os
 import urllib
 import signal
 
+import requests
+
 from tornado.auth import OAuth2Mixin
 from tornado.escape import url_escape
 from tornado import gen, web
@@ -120,7 +122,7 @@ class OAuthLoginHandler(BaseHandler):
         self.authorize_redirect(
             redirect_uri=redirect_uri,
             client_id=self.authenticator.client_id,
-            scope=['repo'],
+            scope=['user', 'repo'],
             response_type='code',
             extra_params={'state': self.create_signed_value('state', repr(state))})
 
@@ -134,6 +136,9 @@ class BitbucketLoginHandler(OAuthLoginHandler, BitbucketMixin):
 
 
 class GitHubOAuthHandler(BaseHandler):
+    nbgrader_url = None
+    TOKEN = None
+
     @gen.coroutine
     def get(self):
         # Check state argument, should be there and contain a dict
@@ -146,17 +151,43 @@ class GitHubOAuthHandler(BaseHandler):
         self.log.debug('State dict: %s', state)
         state.pop('unique')
 
-        username, token = yield self.authenticator.authenticate(self)
-        if username:
+        username, token, email = yield self.authenticator.authenticate(self)
+
+        if username and token:
+            if email:
+                url = '{}/formgrader/api/token/student/{}'.format(
+                    self.nbgrader_url,
+                    username
+                )
+
+                response = requests.request(
+                    method='GET',
+                    headers={
+                        'Token': self.TOKEN
+                    },
+                    url=url,
+                    json={
+                        'email': email
+                    }
+                )
+
+                if response.status_code != 200:
+                    raise web.HTTPError(400, 'nbgrader не отвечает, обратитесь к администратору.')
+            else:
+                raise web.HTTPError(400, 'В вашем GitHub не указана почта, её нужно обязательно указать.')
+
             user = self.user_from_username(username)
             user.token = token
+
             self.set_login_cookie(user)
+
             user.login_service = "github"
+
             if 'repourl' in state:
                 self.log.debug("Redirect with %s", state)
-                self.redirect(self.hub.server.base_url + '/home?' + urllib.parse.urlencode(state))
+                self.redirect(self.hub.server.base_url + 'home?' + urllib.parse.urlencode(state))
             else:
-                self.redirect(self.hub.server.base_url + '/home')
+                self.redirect(self.hub.server.base_url + 'home')
         else:
             raise web.HTTPError(403)
 
@@ -229,9 +260,10 @@ class GitHubOAuthenticator(Authenticator):
         resp_json = json.loads(resp.body.decode('utf8', 'replace'))
 
         username = self.normalize_username(resp_json["login"])
+        email = resp_json.get('email', None)
         if self.whitelist and username not in self.whitelist:
             username = None
-        raise gen.Return((username, access_token))
+        raise gen.Return((username, access_token, email))
 
 
 class BitbucketOAuthenticator(Authenticator):
