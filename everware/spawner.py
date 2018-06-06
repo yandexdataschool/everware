@@ -278,12 +278,18 @@ class CustomDockerSpawner(GitMixin, EmailNotificator, ContainerHandler):
 
     share_user_images = Bool(default_value=True, config=True, help="If True, users will be able restore only own images")
 
+    def user_fmt(self, s):
+        if isinstance(s, dict):
+            s['bind'] = s['bind'].format(username=self.user.name)
+            return s
+        elif isinstance(s, str):
+            return s.format(username=self.user.name)
+
     def handle_student_case(self):
         if self.volumes is None:
             self.volumes = {}
 
-        user_fmt = lambda s: s.format(username=self.user.name)
-        host_dir = user_fmt(self.student_host_homedir)
+        host_dir = self.user_fmt(self.student_host_homedir)
         if not os.path.isdir(host_dir):
             os.mkdir(host_dir)
             os.chmod(host_dir, 0o777)
@@ -294,9 +300,9 @@ class CustomDockerSpawner(GitMixin, EmailNotificator, ContainerHandler):
             copyfile(src_path, dst_path)
 
         formatted_student_volumes = {
-            user_fmt(k) : user_fmt(v) for k,v in self.student_volumes.items()
+            self.user_fmt(k) : self.user_fmt(v) for k,v in self.student_volumes.items()
         }
-        formatted_student_volumes[host_dir] = user_fmt("/home/{username}")
+        formatted_student_volumes[host_dir] = self.user_fmt("/home/{username}")
         self.volumes.update(formatted_student_volumes)
 
     @gen.coroutine
@@ -510,7 +516,7 @@ class CustomDockerSpawner(GitMixin, EmailNotificator, ContainerHandler):
             try:
                 # self.log.info('poll {}'.format(self.user.server.url))
                 yield wait_for_http_server(self.user.server.url, timeout=1)
-            except TimeoutError:
+            except:
                 self.log.warn("Can't reach running container by http")
                 return ''
             return None
