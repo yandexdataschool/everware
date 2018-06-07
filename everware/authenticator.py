@@ -99,6 +99,8 @@ class WelcomeHandler(BaseHandler):
 
 
 class OAuthLoginHandler(BaseHandler):
+    default_scope = ['repo']
+
     def get(self):
         guess_uri = '{proto}://{host}{path}'.format(
             proto=self.request.protocol,
@@ -122,7 +124,7 @@ class OAuthLoginHandler(BaseHandler):
         self.authorize_redirect(
             redirect_uri=redirect_uri,
             client_id=self.authenticator.client_id,
-            scope=['user', 'repo'],
+            scope=self.default_scope,
             response_type='code',
             extra_params={'state': self.create_signed_value('state', repr(state))})
 
@@ -131,11 +133,43 @@ class GitHubLoginHandler(OAuthLoginHandler, GitHubMixin):
     pass
 
 
+class GitHubEmailLoginHandler(GitHubLoginHandler):
+    default_scope = ['user', 'repo']
+
+
 class BitbucketLoginHandler(OAuthLoginHandler, BitbucketMixin):
     pass
 
 
 class GitHubOAuthHandler(BaseHandler):
+    @gen.coroutine
+    def get(self):
+        # Check state argument, should be there and contain a dict
+        # as created in OAuthLoginHandler
+        state = self.get_secure_cookie('state', self.get_argument('state', ''))
+        if state is None:
+            raise web.HTTPError(403)
+
+        state = eval(state)
+        self.log.debug('State dict: %s', state)
+        state.pop('unique')
+
+        username, token = yield self.authenticator.authenticate(self)
+        if username:
+            user = self.user_from_username(username)
+            user.token = token
+            self.set_login_cookie(user)
+            user.login_service = "github"
+            if 'repourl' in state:
+                self.log.debug("Redirect with %s", state)
+                self.redirect(self.hub.server.base_url + '/home?' + urllib.parse.urlencode(state))
+            else:
+                self.redirect(self.hub.server.base_url + '/home')
+        else:
+            raise web.HTTPError(403)
+
+
+class GitHubEmailOAuthHandler(GitHubOAuthHandler):
     nbgrader_url = None
     TOKEN = None
 
@@ -185,9 +219,9 @@ class GitHubOAuthHandler(BaseHandler):
 
             if 'repourl' in state:
                 self.log.debug("Redirect with %s", state)
-                self.redirect(self.hub.server.base_url + 'home?' + urllib.parse.urlencode(state))
+                self.redirect(self.hub.server.base_url + '/home?' + urllib.parse.urlencode(state))
             else:
-                self.redirect(self.hub.server.base_url + 'home')
+                self.redirect(self.hub.server.base_url + '/home')
         else:
             raise web.HTTPError(403)
 
@@ -206,6 +240,66 @@ class GitHubOAuthenticator(Authenticator):
 
     def login_url(self, base_url):
         return url_path_join(base_url, 'login')
+
+    def get_handlers(self, app):
+        return [
+            (r'/login', WelcomeHandler),
+            (r'/oauth_login', GitHubEmailLoginHandler),
+            (r'/oauth_callback', GitHubOAuthHandler),
+        ]
+
+    @gen.coroutine
+    def authenticate(self, handler):
+        code = handler.get_argument("code", False)
+        if not code:
+            raise web.HTTPError(400, "oauth callback made without a token")
+        # TODO: Configure the curl_httpclient for tornado
+        http_client = AsyncHTTPClient()
+
+        # Exchange the OAuth code for a GitHub Access Token
+        #
+        # See: https://developer.github.com/v3/oauth/
+
+        # GitHub specifies a POST request yet requires URL parameters
+        params = dict(
+            client_id=self.client_id,
+            client_secret=self.client_secret,
+            code=code
+        )
+
+        url = url_concat("https://github.com/login/oauth/access_token",
+                         params)
+
+        req = HTTPRequest(url,
+                          method="POST",
+                          headers={"Accept": "application/json"},
+                          body=''  # Body is required for a POST...
+                          )
+
+        resp = yield http_client.fetch(req)
+        resp_json = json.loads(resp.body.decode('utf8', 'replace'))
+
+        access_token = resp_json['access_token']
+
+        # Determine who the logged in user is
+        headers = {"Accept": "application/json",
+                   "User-Agent": "JupyterHub",
+                   "Authorization": "token {}".format(access_token)
+                   }
+        req = HTTPRequest("https://api.github.com/user",
+                          method="GET",
+                          headers=headers
+                          )
+        resp = yield http_client.fetch(req)
+        resp_json = json.loads(resp.body.decode('utf8', 'replace'))
+
+        username = self.normalize_username(resp_json["login"])
+        if self.whitelist and username not in self.whitelist:
+            username = None
+        raise gen.Return((username, access_token))
+
+
+class GitHubOEmailAuthenticator(GitHubOAuthenticator):
 
     def get_handlers(self, app):
         return [
