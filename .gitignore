@@ -30,3 +30,6 @@ src/*
 .cache/*
 .idea/*
 .vscode/*
+env.docker-local
+env.docker-remote
+env.docker-swarm
