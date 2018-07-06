@@ -358,3 +358,122 @@ class DummyTokenAuthenticator(Authenticator):
     def authenticate(self, handler, data):
         self.test_token = data['password']
         return data['username']
+
+
+class YandexPassportMixin(OAuth2Mixin):
+    _OAUTH_AUTHORIZE_URL = "https://oauth.yandex.ru/authorize"
+    _OAUTH_ACCESS_TOKEN_URL = "https://oauth.yandex.ru/token"
+
+
+class YandexPassportLoginHandler(BaseHandler, YandexPassportMixin):
+    def get(self, *args, **kwargs):
+        redirect_url = self.authenticator.oauth_callback_url
+        self.log.info('oauth redirect: %r', redirect_url)
+
+        repourl = self.get_argument('repourl', '')
+
+        state = {'unique': 42}
+        if repourl:
+            state['repourl'] = repourl
+        state.update({param: self.get_argument(param) for param in self.request.arguments})
+
+        self.authorize_redirect(
+            redirect_url=redirect_url,
+            client_id=self.authenticator.client_id,
+            response_type='code',
+            extra_params={'state': self.create_signed_value('state', repr(state))},
+        )
+
+
+class YandexPassportOAuthHandler(BaseHandler):
+    @gen.coroutine
+    def get(self, *args, **kwargs):
+        # Check state argument, should be there and contain a dict
+        # as created in OAuthLoginHandler
+        state = self.get_secure_cookie('state', self.get_argument('state', ''))
+        if state is None:
+            raise web.HTTPError(403)
+
+        state = eval(state)
+        self.log.debug('State dict: %s', state)
+        state.pop('unique')
+
+        username, token = yield self.authenticator.authenticate(self)
+        if username:
+            user = self.user_from_username(username)
+            user.token = token
+            self.set_login_cookie(user)
+            user.login_service = "ya_passport"
+            if 'repourl' in state:
+                self.log.debug("Redirect with %s", state)
+                self.redirect(self.hub.server.base_url + '/home?' + urllib.parse.urlencode(state))
+            else:
+                self.redirect(self.hub.server.base_url + '/home')
+        else:
+            raise web.HTTPError(403)
+
+
+class YandexPassportOAuthenticater(Authenticator):
+    login_service = 'Yandex.Passport'
+    oauth_callback_url = Unicode('', config=True)
+    client_id = Unicode(os.environ.get('YA_PASSPORT_CLIENT_ID', ''), config=True)
+    client_secret = Unicode(os.environ.get('YA_PASSPORT_CLIENT_SECRET', ''), config=True)
+
+    http_client = AsyncHTTPClient()
+
+    def login_url(self, base_url):
+        return url_path_join(base_url, 'oauth_login')
+
+    def get_handlers(self, app):
+        return [
+            (r'/login', WelcomeHandler),
+            (r'/oauth_login', YandexPassportLoginHandler),
+            (r'/oauth_callback', YandexPassportOAuthHandler),
+        ]
+
+    @gen.coroutine
+    def authenticate(self, handler):
+        code = handler.get_argument("code", False)
+        if not code:
+            raise web.HTTPError(400, "oauth_callback made without a token")
+
+        params = dict(
+            client_id=self.client_id,
+            client_secret=self.client_secret,
+            code=code,
+            grant_type='authorization_code',
+        )
+
+        url = url_concat("https://oauth.yandex.ru/token", params)
+
+        request = HTTPRequest(url,
+                          method="POST",
+                          headers={
+                              "Accept": "application/json",
+                          },
+                          body='')
+
+        response = yield self.http_client.fetch(request)
+        resp_json = json.loads(response.body.decode('utf8', 'replace'))
+
+        access_token = resp_json['access_token']
+        user_info = self.get_user_info(access_token)
+
+        username = self.normalize_username(resp_json['login'])
+        if self.whitelist and username not in self.whitelist:
+            username = None
+
+        raise gen.Return((username, access_token))
+
+    def get_user_info(self, access_token):
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "JupyterHub",
+            "Authorization": "OAuth {}".format(access_token),
+        }
+
+        request = HTTPRequest("https://login.yandex.ru/info",
+                          method="GET",
+                          headers=headers)
+        response = yield self.http_client.fetch(request)
+        return json.loads(response.body.decode('utf8', 'replace'))
