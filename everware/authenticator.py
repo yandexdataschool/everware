@@ -9,7 +9,7 @@ import os
 import urllib
 import signal
 
-from tornado.auth import OAuth2Mixin
+from tornado.auth import OAuth2Mixin, urllib_parse
 from tornado.escape import url_escape
 from tornado import gen, web
 
@@ -367,8 +367,8 @@ class YandexPassportMixin(OAuth2Mixin):
 
 class YandexPassportLoginHandler(BaseHandler, YandexPassportMixin):
     def get(self, *args, **kwargs):
-        redirect_url = self.authenticator.oauth_callback_url
-        self.log.info('oauth redirect: %r', redirect_url)
+        redirect_uri = self.authenticator.oauth_callback_url
+        self.log.info('oauth redirect: %r', redirect_uri)
 
         repourl = self.get_argument('repourl', '')
 
@@ -378,7 +378,7 @@ class YandexPassportLoginHandler(BaseHandler, YandexPassportMixin):
         state.update({param: self.get_argument(param) for param in self.request.arguments})
 
         self.authorize_redirect(
-            redirect_url=redirect_url,
+            redirect_uri=redirect_uri,
             client_id=self.authenticator.client_id,
             response_type='code',
             extra_params={'state': self.create_signed_value('state', repr(state))},
@@ -413,7 +413,7 @@ class YandexPassportOAuthHandler(BaseHandler):
             raise web.HTTPError(403)
 
 
-class YandexPassportOAuthenticater(Authenticator):
+class YandexPassportOAuthenticator(Authenticator):
     login_service = 'Yandex.Passport'
     oauth_callback_url = Unicode('', config=True)
     client_id = Unicode(os.environ.get('YA_PASSPORT_CLIENT_ID', ''), config=True)
@@ -437,43 +437,41 @@ class YandexPassportOAuthenticater(Authenticator):
         if not code:
             raise web.HTTPError(400, "oauth_callback made without a token")
 
-        params = dict(
+        post_args = dict(
             client_id=self.client_id,
             client_secret=self.client_secret,
             code=code,
             grant_type='authorization_code',
         )
 
-        url = url_concat("https://oauth.yandex.ru/token", params)
-
-        request = HTTPRequest(url,
-                          method="POST",
-                          headers={
-                              "Accept": "application/json",
-                          },
-                          body='')
+        request = HTTPRequest(
+            'https://oauth.yandex.ru/token',
+            method="POST",
+            headers={
+                "Accept": "application/json",
+            },
+            body=urllib_parse.urlencode(post_args),
+        )
 
         response = yield self.http_client.fetch(request)
         resp_json = json.loads(response.body.decode('utf8', 'replace'))
 
         access_token = resp_json['access_token']
-        user_info = self.get_user_info(access_token)
 
-        username = self.normalize_username(resp_json['login'])
-        if self.whitelist and username not in self.whitelist:
-            username = None
-
-        raise gen.Return((username, access_token))
-
-    def get_user_info(self, access_token):
+        # get user info
         headers = {
             "Accept": "application/json",
             "User-Agent": "JupyterHub",
             "Authorization": "OAuth {}".format(access_token),
         }
 
-        request = HTTPRequest("https://login.yandex.ru/info",
-                          method="GET",
-                          headers=headers)
+        request = HTTPRequest("https://login.yandex.ru/info", method="GET", headers=headers)
         response = yield self.http_client.fetch(request)
-        return json.loads(response.body.decode('utf8', 'replace'))
+
+        user_info = json.loads(response.body.decode('utf8', 'replace'))
+
+        username = self.normalize_username(user_info['login'])
+        if self.whitelist and username not in self.whitelist:
+            username = None
+
+        raise gen.Return((username, access_token))
