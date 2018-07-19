@@ -4,7 +4,6 @@
 {% endblock %}
 
 {% block main %}
-
 <div class="spawn-error-msg text-danger" id="error_text"
 {% if not error_message %}
 style="display: none;"
@@ -14,31 +13,42 @@ style="display: none;"
   Error: {{error_message}}
 {% endif %}
 </div>
+
 <form enctype="multipart/form-data" id="spawn_form" action="{{base_url}}spawn" method="post" role="form" style="margin-bottom: 5px;">
   {{spawner_options_form | safe}}
   <br>
   <input type="submit" value="Launch notebook" class="mdl-button mdl-js-button mdl-button--raised mdl-button--colored">
 </form>
 
-Paste the link to the git repository you want to try out. If you
-need some inspiration try one of the following repositories:
+<p>Paste the link to the git repository you want to try out.
+If you need some inspiration try one of the following repositories:</p>
+
 <ul>
+  {% for repo in user.spawner.student_images %}
   <li>
-    <a id="clipboard-example-1" href="https://github.com/everware/everware-dimuon-example">https://github.com/everware/everware-dimuon-example</a>
-    <button class="mdl-button mdl-js-button mdl-button--icon clipboard-example--button" data-text-source="clipboard-example-1" title="Copy to form">
+    <a href="{{ repo }}">{{ repo }}</a>
+    <button class="mdl-button mdl-js-button mdl-button--icon clipboard-example--button" data-source="{{ repo }}" title="Copy to form">
+      <i class="material-icons">content_copy</i>
+    </button>
+  </li>
+  {% else %}
+  <li>
+    <a href="https://github.com/everware/everware-dimuon-example">https://github.com/everware/everware-dimuon-example</a>
+    <button class="mdl-button mdl-js-button mdl-button--icon clipboard-example--button" data-source="https://github.com/everware/everware-dimuon-example" title="Copy to form">
       <i class="material-icons">content_copy</i>
     </button>
   </li>
   <li>
-    <a id="clipboard-example-2" href="https://github.com/betatim/everware-demo">https://github.com/betatim/everware-demo</a>
-    <button class="mdl-button mdl-js-button mdl-button--icon clipboard-example--button" data-text-source="clipboard-example-2" title="Copy to form">
+    <a href="https://github.com/betatim/everware-demo">https://github.com/betatim/everware-demo</a>
+    <button class="mdl-button mdl-js-button mdl-button--icon clipboard-example--button" data-source="https://github.com/betatim/everware-demo" title="Copy to form">
       <i class="material-icons">content_copy</i>
     </button>
   </li>
+  {% endfor %}
 </ul>
-Read the documentation
-to <a href="https://github.com/everware/everware/wiki/Being-everware-compatible">learn
-how to make your repositories work</a> with everware.
+
+<p>Read the documentation to <a href="https://github.com/everware/everware/wiki/Being-everware-compatible">learn
+how to make your repositories work</a> with everware.</p>
 
 {% endblock %}
 
@@ -62,9 +72,10 @@ require(["jquery"], function ($) {
 
   $('.clipboard-example--button').click(function (e) {
       var input = $('#repository_input');
-      var linkId = $(e.currentTarget).attr('data-text-source');
-      var href = $('#' + linkId).attr('href');
-      input.val(href).parent().addClass('is-focused');
+      var source = $(this).data('source');
+      // var linkId = $(e.currentTarget).attr('data-text-source');
+      // var href = $('#' + linkId).attr('href');
+      input.val(source).parent().addClass('is-focused');
   });
 });
 </script>

@@ -17,3 +17,8 @@ c.JupyterHub.proxy_api_ip = '0.0.0.0'
 c.DockerSpawner.hub_ip_connect = os.environ['DOCKER_PUBLIC_IP']
 # IP of the machine running Docker service, normally the same as above
 c.DockerSpawner.container_ip = c.DockerSpawner.hub_ip_connect
+
+c.Spawner.student_images = [
+    "https://github.com/kidig/everware-image",
+    "https://github.com/yandexdataschool/everware-base-image",
+]
