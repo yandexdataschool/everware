@@ -4,14 +4,8 @@
 {% endblock %}
 
 {% block main %}
-<div class="spawn-error-msg text-danger" id="error_text"
-{% if not error_message %}
-style="display: none;"
->
-{% else %}
->
-  Error: {{error_message}}
-{% endif %}
+<div class="spawn-error-msg text-danger" id="error_text"{% if not error_message %} style="display: none;"{% endif %}>
+{% if error_message %}Error: {{ error_message }}{% endif %}
 </div>
 
 <form enctype="multipart/form-data" id="spawn_form" action="{{base_url}}spawn" method="post" role="form" style="margin-bottom: 5px;">
