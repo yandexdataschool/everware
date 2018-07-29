@@ -422,7 +422,7 @@ class YandexPassportOAuthenticator(Authenticator):
     http_client = AsyncHTTPClient()
 
     def login_url(self, base_url):
-        return url_path_join(base_url, 'oauth_login')
+        return url_path_join(base_url, 'login')
 
     def get_handlers(self, app):
         return [
